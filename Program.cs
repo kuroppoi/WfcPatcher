@@ -2,9 +2,22 @@
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
+using System.IO;
 
 namespace WfcPatcher {
 	class Program {
+
+		private static byte[] EVILCHECK_MODULUS = {
+            0xD9, 0x87, 0xD4, 0x65, 0xE4, 0xEE, 0xAE, 0x58, 0x2D, 0x01, 0x73, 0x15, 0xF0, 0x0E, 0xA3, 0x40,
+            0x0C, 0x51, 0x0B, 0x2E, 0x51, 0xE1, 0x5D, 0x77, 0xD0, 0x3A, 0xDC, 0xB2, 0x5C, 0x83, 0x01, 0x71,
+            0xF5, 0x69, 0xFB, 0xD2, 0x6A, 0x78, 0xDC, 0x69, 0x69, 0x4D, 0xDD, 0x2C, 0xEF, 0xA4, 0xA9, 0xAA,
+            0xD1, 0xA0, 0xD9, 0xAA, 0x99, 0x70, 0x5B, 0xF0, 0x80, 0x38, 0xF5, 0x77, 0x64, 0xEE, 0xA5, 0xAB,
+            0x7D, 0x6A, 0x38, 0x38, 0x67, 0x8A, 0xEC, 0x26, 0x2E, 0x95, 0x2A, 0x1C, 0xDB, 0xB8, 0xE2, 0xFF,
+            0x68, 0xDC, 0x93, 0x2E, 0x7F, 0x8E, 0x3A, 0xEC, 0xD1, 0xFE, 0x52, 0x82, 0xEA, 0xCA, 0x41, 0x61,
+            0xC2, 0x20, 0x3F, 0xF0, 0x98, 0xF7, 0x9D, 0x67, 0x35, 0xE6, 0x44, 0x14, 0xE1, 0x85, 0xFB, 0xB3,
+            0xEC, 0x04, 0x3D, 0x83, 0x8D, 0x9B, 0x4B, 0x19, 0x07, 0x23, 0x31, 0xC3, 0xF7, 0x98, 0x57, 0xE5
+        };
+
 		public static string ProgramName {
 			get {
 				Version version = System.Reflection.Assembly.GetEntryAssembly().GetName().Version;
@@ -27,26 +40,40 @@ namespace WfcPatcher {
 				return;
 			}
 
-			if ( CommandLineArguments.Filenames.Length == 0 ) {
+			if ( CommandLineArguments.Filenames.Length == 0 || CommandLineArguments.ModulusFilename == null ) {
 				PrintUsage();
 				return;
 			}
 
-			string domainFilenamePart = "NoSSL";
-			if ( CommandLineArguments.Domain != null ) {
-				domainFilenamePart = CommandLineArguments.Domain;
+			byte[] customModulus = null;
+
+			try
+			{
+                customModulus = File.ReadAllBytes(CommandLineArguments.ModulusFilename);
+			} catch(Exception ex) {
+				Console.WriteLine("Couldn't read modulus file");
+				Console.WriteLine(ex.ToString());
+				Console.WriteLine();
+				return;
 			}
+
+			if(customModulus.Length != EVILCHECK_MODULUS.Length) {
+				Console.WriteLine("Modulus length must be " + EVILCHECK_MODULUS.Length + " bytes.");
+				return;
+			}
+
+			string domainFilenamePart = "Patched";
+
 			foreach ( string filename in CommandLineArguments.Filenames ) {
 				string newFilename = System.IO.Path.Combine( System.IO.Path.GetDirectoryName( filename ), System.IO.Path.GetFileNameWithoutExtension( filename ) ) + " (" + domainFilenamePart + ")" + System.IO.Path.GetExtension( filename );
 #if !DEBUG
 				try {
 #endif
-					if ( PatchFile( filename, newFilename ) ) {
+					if ( PatchFile( filename, newFilename, customModulus) ) {
 						Console.WriteLine( "Patched to " + newFilename + "!" );
 						Console.WriteLine();
 					} else {
 						Console.WriteLine( "Found nothing to patch in " + filename + "." );
-						Console.WriteLine( "Are you sure this is a WFC-enabled game?" );
 						Console.WriteLine();
 						System.IO.File.Delete( newFilename );
 					}
@@ -62,11 +89,11 @@ namespace WfcPatcher {
 		}
 
 		public static void PrintUsage() {
-			Console.WriteLine( "Usage: WfcPatcher [options] game1.nds [game2.nds] [game3.nds] [...]" );
+			Console.WriteLine( "Usage: WfcPatcher --modulus-file [custom_modulus.bin] game1.nds [game2.nds] [game3.nds] [...]" );
 			Console.WriteLine();
 			Console.WriteLine( "Command line options:" );
-			Console.WriteLine( "  -d, --domain example.com" );
-			Console.WriteLine( "    Point the NWFC URLs to a different URL instead." );
+			Console.WriteLine( "  -mf --modulus-file [custom_modulus.bin" );
+			Console.WriteLine( "    The file containing the custom public key modulus to patch into the ROM." );
 		}
 
 		public static string GetGamecode( System.IO.FileStream nds ) {
@@ -77,7 +104,7 @@ namespace WfcPatcher {
 			return gamecode;
 		}
 
-		static bool PatchFile( string filename, string newFilename ) {
+		static bool PatchFile( string filename, string newFilename, byte[] customModulus) {
 			Console.WriteLine( "Reading and copying " + filename + "..." );
 			using ( var nds = new System.IO.FileStream( newFilename, System.IO.FileMode.Create ) ) {
 				using ( var ndsSrc = new System.IO.FileStream( filename, System.IO.FileMode.Open ) ) {
@@ -99,8 +126,8 @@ namespace WfcPatcher {
 				uint arm7load = nds.ReadUInt32();
 				uint arm7size = nds.ReadUInt32();
 
-				bool modArm9 = PatchArm9( nds, arm9offset, arm9size );
-				bool modArm7 = PatchArm7( nds, arm7offset, arm7size );
+				bool modArm9 = PatchArm9( nds, arm9offset, arm9size, customModulus);
+				bool modArm7 = PatchArm7( nds, arm7offset, arm7size, customModulus);
 
 				// overlays
 				Console.WriteLine( "Patching Overlays..." );
@@ -110,8 +137,8 @@ namespace WfcPatcher {
 				uint arm7overlayoff = nds.ReadUInt32();
 				uint arm7overlaylen = nds.ReadUInt32();
 
-				bool modOvl9 = PatchOverlay( nds, arm9overlayoff, arm9overlaylen );
-				bool modOvl7 = PatchOverlay( nds, arm7overlayoff, arm7overlaylen );
+				bool modOvl9 = PatchOverlay( nds, arm9overlayoff, arm9overlaylen, customModulus);
+				bool modOvl7 = PatchOverlay( nds, arm7overlayoff, arm7overlaylen, customModulus);
 
 				nds.Close();
 
@@ -119,7 +146,7 @@ namespace WfcPatcher {
 			}
 		}
 
-		static bool PatchArm9( System.IO.FileStream nds, uint pos, uint len ) {
+		static bool PatchArm9( System.IO.FileStream nds, uint pos, uint len, byte[] customModulus) {
 			nds.Position = pos;
 			byte[] data = new byte[len];
 			nds.Read( data, 0, (int)len );
@@ -167,7 +194,7 @@ namespace WfcPatcher {
 			}
 
 			byte[] decDataUnmodified = (byte[])decData.Clone();
-			if ( ReplaceInData( decData, 0x00, true ) ) {
+			if ( ReplaceInData( decData, customModulus) ) {
 				if ( compressed ) {
 					Console.WriteLine( "Replacing and recompressing ARM9..." );
 					data = blz.BLZ_Encode( decData, 0 );
@@ -176,7 +203,7 @@ namespace WfcPatcher {
 					if ( newCompressedSize > len ) {
 						// new ARM is actually bigger, redo without the additional nullterm replacement
 						decData = decDataUnmodified;
-						ReplaceInData( decData, 0x00, false );
+						ReplaceInData( decData, customModulus);
 						data = blz.BLZ_Encode( decData, 0, supressWarnings: true );
 						newCompressedSize = (uint)data.Length;
 
@@ -291,12 +318,12 @@ namespace WfcPatcher {
 			return false;
 		}
 
-		static bool PatchArm7( System.IO.FileStream nds, uint pos, uint len ) {
+		static bool PatchArm7( System.IO.FileStream nds, uint pos, uint len, byte[] customModulus ) {
 			nds.Position = pos;
 			byte[] data = new byte[len];
 			nds.Read( data, 0, (int)len );
 
-			if ( ReplaceInData( data ) ) {
+			if ( ReplaceInData( data, customModulus) ) {
 				Console.WriteLine( "Replacing ARM7..." );
 				nds.Position = pos;
 				nds.Write( data, 0, data.Length );
@@ -307,7 +334,7 @@ namespace WfcPatcher {
 			return false;
 		}
 
-		static bool PatchOverlay( System.IO.FileStream nds, uint pos, uint len ) {
+		static bool PatchOverlay( System.IO.FileStream nds, uint pos, uint len, byte[] customModulus) {
 			// http://sourceforge.net/p/devkitpro/ndstool/ci/master/tree/source/ndsextract.cpp
 			// http://sourceforge.net/p/devkitpro/ndstool/ci/master/tree/source/overlay.h
 			// header compression info from http://gbatemp.net/threads/recompressing-an-overlay-file.329576/
@@ -359,7 +386,7 @@ namespace WfcPatcher {
 				System.IO.File.WriteAllBytes( "overlay" + ( i / 0x20 ) + "-dec.bin", decData );
 #endif
 
-				if ( ReplaceInData( decData ) ) {
+				if ( ReplaceInData( decData, customModulus ) ) {
 					modified = true;
 					int newOverlaySize;
 					int diff;
@@ -481,21 +508,12 @@ namespace WfcPatcher {
 			return knownGame;
 		}
 
-		static bool ReplaceInData( byte[] data, byte paddingByte = 0x00, bool writeAdditionalBytePostString = false ) {
-			bool replaced = ReplaceInData( data, "https://", "http://", paddingByte, writeAdditionalBytePostString );
-
-			if ( CommandLineArguments.Domain != null ) {
-				replaced = ReplaceInData( data, "nintendowifi.net", CommandLineArguments.Domain, paddingByte, writeAdditionalBytePostString ) || replaced;
-			}
-
-			return replaced;
+		static bool ReplaceInData( byte[] data, byte[] replaceBytes) {
+			return ReplaceInData( data, EVILCHECK_MODULUS, replaceBytes);
 		}
 
-		static bool ReplaceInData( byte[] data, string search, string replace, byte paddingByte = 0x00, bool writeAdditionalBytePostString = false ) {
+		static bool ReplaceInData( byte[] data, byte[] searchBytes, byte[] replaceBytes) {
 			bool replacedData = false;
-			byte[] searchBytes = Encoding.ASCII.GetBytes( search );
-			byte[] replaceBytes = Encoding.ASCII.GetBytes( replace );
-			int requiredPadding = searchBytes.Length - replaceBytes.Length;
 
 			var results = data.Locate( searchBytes );
 			if ( results.Length == 0 ) {
@@ -503,35 +521,8 @@ namespace WfcPatcher {
 			}
 
 			foreach ( int result in results ) {
-				string originalString = Util.GetTextAscii( data, result );
-#if DEBUG
-				Console.WriteLine( originalString );
-#endif
-				if ( originalString == "https://" ) { continue; } // don't replace lone https, probably used for strcmp to figure out if an URL is SSL or not
-				string replacedString = originalString.Replace( search, replace );
-				byte[] replacedStringBytes = Encoding.ASCII.GetBytes( replacedString );
-
+				Array.Copy(replaceBytes, 0, data, result, replaceBytes.Length);
 				replacedData = true;
-
-				int i = 0;
-				for ( ; i < replacedStringBytes.Length; ++i ) {
-					data[result + i] = replacedStringBytes[i];
-				}
-				for ( ; i < replacedStringBytes.Length + requiredPadding; ++i ) {
-					data[result + i] = paddingByte;
-				}
-
-				// Alright, this might require some explaination.
-				// This is putting a byte in the location that previously held the NULL terminator at the end of the string.
-				// Thanks to "http" being one byte shorter than "https", the new NULL terminator was just placed in the
-				// padding loop above, and the byte below, at [result + i], is unused. Thus, we can just place anything in
-				// there without affecting the program. Now, the actual *reason* we're putting a byte in here is to reduce
-				// the chance of the recompressed binary becoming smaller than the original one. We want it to remain the
-				// exact same size. Now, of course, this is not always going to happen, but this should improve the chance
-				// significantly.
-				if ( writeAdditionalBytePostString ) {
-					data[result + i] = 0x7F;
-				}
 			}
 
 			return replacedData;

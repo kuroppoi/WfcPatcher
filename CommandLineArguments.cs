@@ -6,7 +6,7 @@ using System.Text;
 namespace WfcPatcher {
 	static class CommandLineArguments {
 		public static string[] Filenames { get; private set; }
-		public static string Domain = null;
+		public static string ModulusFilename { get; private set; }
 
 		public static bool ParseCommandLineArguments( string[] args ) {
 			bool parseSuccess = true;
@@ -16,17 +16,10 @@ namespace WfcPatcher {
 
 				for ( int i = 0; i < args.Length; ++i ) {
 					switch ( args[i] ) {
-						case "-d":
-						case "--domain":
-							string domain = args[++i];
-							int maxLength = "nintendowifi.net".Length;
-							if ( domain.Length <= maxLength ) {
-								Domain = domain;
-							} else {
-								Console.WriteLine( "Replacement domain cannot be longer than original domain ({0} characters).", maxLength );
-								parseSuccess = false;
-							}
-							break;
+						case "-mf":
+						case "--modulus-file":
+							ModulusFilename = args[++i];
+                            break;
 						default:
 							filenames.Add( args[i] );
 							break;
