@@ -1,10 +1,10 @@
 WfcPatcher
 ==========
 
-Patches NDS games to allow them to connect to a custom server, such as [AltWfc](http://altwfc.net).
+Custom fork that patches Pokémon BW/B2W2 ROMs to replace the party validation public key modulus with a custom one.
 
-Just drag and drop your dumped NDS games onto the executable to patch them.
+Example usage:
 
-The following command line options are supported:
-
-    -d, --domain example.com            Point the NWFC URLs to a different URL instead.
+```
+wfcpatcher.exe my_rom.nds --modulus-file my_modulus.bin
+```
